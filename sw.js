@@ -1,21 +1,27 @@
 // 서비스 워커: 오프라인에서도 열리도록 앱 파일을 기기에 보관한다
-const CACHE = '내돈관리-v6';
+const CACHE = '내돈관리-v8';
 const SHELL = [
   './', './index.html', './manifest.json', './css/style.css',
-  './js/app.js', './js/store.js', './js/rules.js', './js/calc.js', './js/recommend.js', './js/ui.js', './js/pages.js', './js/onboarding.js',
+  './js/app.js', './js/store.js', './js/rules.js', './js/calc.js', './js/recommend.js', './js/ui.js', './js/pages.js', './js/onboarding.js', './js/qr.js', './js/transfer.js',
   './데이터/금융규칙.json', './데이터/금융규칙_임시.json', './데이터/예시_사용자.json',
   './아이콘/icon.svg', './아이콘/icon-192.png', './아이콘/icon-512.png',
 ];
 const CHART = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';
+// QR 만들기·읽기 도구 (F17, 버전 고정)
+const CDN = [
+  CHART,
+  'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js',
+  'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js',
+];
 
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
     const c = await caches.open(CACHE);
     // 파일을 하나씩 받아 보관한다 (하나가 실패해도 나머지는 보관)
-    const urls = [...SHELL.map(p => new URL(encodeURI(p), self.location).href), CHART];
+    const urls = [...SHELL.map(p => new URL(encodeURI(p), self.location).href), ...CDN];
     await Promise.all(urls.map(async u => {
       try {
-        const res = await fetch(new Request(u, { cache: 'reload', mode: u === CHART ? 'cors' : 'same-origin' }));
+        const res = await fetch(new Request(u, { cache: 'reload', mode: CDN.includes(u) ? 'cors' : 'same-origin' }));
         if (res.ok) await c.put(u, res);
       } catch (err) { /* 인터넷이 안 되면 다음 접속 때 다시 보관 */ }
     }));
@@ -50,7 +56,7 @@ self.addEventListener('fetch', e => {
     })());
     return;
   }
-  if (url.origin !== location.origin && url.href !== CHART) return;
+  if (url.origin !== location.origin && !CDN.includes(url.href)) return;
   // 앱 파일: 보관본 먼저, 뒤에서 새로 받아 갱신
   e.respondWith((async () => {
     const c = await caches.open(CACHE);

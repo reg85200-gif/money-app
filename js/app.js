@@ -60,9 +60,12 @@ function ruleBadge() {
   document.getElementById('rule-badge').innerHTML = `<a href="#/설정" title="금융 규칙 정보">규칙 기준일 ${esc(i.기준일 || '-')}${i.임시값사용 ? ' · <strong class="warn">임시값 사용 중</strong>' : ''}</a>`;
 }
 
+const BEFORE_ONBOARDING = ['설정', '용어', '옮기기'];
+
 function route() {
   let name = decodeURIComponent((location.hash || '').replace(/^#\/?/, '')) || '대시보드';
-  if (!ctx.state.프로필.온보딩완료 && name !== '설정' && name !== '용어') name = '온보딩';
+  // 온보딩 전에도 열 수 있는 화면: 설정(백업 가져오기), 용어, QR 옮기기(새 기기에서 받기)
+  if (!ctx.state.프로필.온보딩완료 && !BEFORE_ONBOARDING.includes(name)) name = '온보딩';
   if (!PAGES[name]) name = '대시보드';
   const main = document.getElementById('main');
   document.body.classList.toggle('ob-mode', name === '온보딩');

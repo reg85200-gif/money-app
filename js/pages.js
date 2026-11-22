@@ -1,9 +1,10 @@
-// 각 화면 (F1~F11, F16)
+// 각 화면 (F1~F11, F16, F17)
 import * as C from './calc.js';
 import { recommendations } from './recommend.js';
 import { won, pct, esc, term, moneyInput, bindMoneyInputs, parseMoney, parsePercent, percentInput, modal, toast, bar, manwon } from './ui.js';
 import { ACCOUNT_TYPES, SAVING_TYPES, newId, makeBackup, parseBackup, clearState, emptyState } from './store.js';
 import { renderOnboarding, balanceTip } from './onboarding.js';
+import { renderTransfer, openTransfer, leaveTransfer } from './transfer.js';
 
 // 월급 배분 비율 항목 (계획서 4장 ① 배분예시.비율, 2026-11-22 예비비 추가)
 const ALLOC_KEYS = ['고정비', '생활비', '저축', '비상금', '예비비', '투자'];
@@ -58,7 +59,7 @@ function dashboard(root, ctx) {
       <p class="hint">평균 ${trend.평균 === null ? '— (기록 없음)' : `<strong>${won(trend.평균)}</strong> (기록한 ${trend.기록개월}개월)`} · 기준 월급 ${won(trend.기준)}</p>
       ${trend.기록개월 ? '<div class="chart-box"><canvas id="pay" aria-label="최근 12개월 월급 막대 차트"></canvas></div>' : empty('아직 월급 기록이 없어요.', '#/월급', '이번 달 월급 입력')}
     </section>`;
-  root.querySelectorAll('[data-pay-now]').forEach(a => { a.onclick = () => { payMonth = C.monthKey(); }; });
+  root.querySelectorAll('[data-pay-now]').forEach(a => { a.onclick = () => { openPayMonth(C.monthKey()); }; });
   if (!window.Chart) {
     root.querySelectorAll('.chart-box').forEach(b => { b.innerHTML = '<p class="hint">차트 도구를 불러오지 못했어요. 인터넷에 연결한 뒤 한 번 열면 다음부터는 오프라인에서도 보여요.</p>'; });
     return;
@@ -238,7 +239,7 @@ function allocation(root, ctx) {
       </tbody></table>
     </section>`;
   bindMonthAdjust(root, ctx);
-  root.querySelector('[data-pay-now]').onclick = () => { payMonth = C.monthKey(); };
+  root.querySelector('[data-pay-now]').onclick = () => { openPayMonth(C.monthKey()); };
   const f = root.querySelector('#alloc');
   f.프리셋.onchange = () => {
     const p = presets.find(x => x.이름 === f.프리셋.value);
@@ -272,8 +273,11 @@ function allocation(root, ctx) {
 }
 
 // ───────── F16 이번 달 월급 기록 ─────────
-let payMonth = null; // 월급 기록 화면에서 고친 달 (없으면 이번 달)
-export function openPayMonth(m) { payMonth = m; }
+// 월급 기록 화면에서 보고 있는 달 (없으면 이번 달). 화면 안에서 다시 그릴 때만 유지하고,
+// 다른 화면에서 들어오면 renderPage가 이번 달로 되돌린다 (버그 3)
+let payMonth = null;
+let payMonthNext = null; // 다른 화면에서 특정 달로 열 때 (openPayMonth)
+export function openPayMonth(m) { payMonthNext = m; }
 
 function monthLabel(m) { return m.replace('-', '년 ').replace(/^(\d+년 )0?/, '$1') + '월'; }
 function signed(v) { return (v > 0 ? '+' : v < 0 ? '−' : '') + won(Math.abs(v)); }
@@ -384,6 +388,16 @@ function payPage(root, ctx) {
     let 실수령 = parseMoney(f.실수령.value);
     if (!실수령 && 내역.length) 실수령 = 내역.reduce((a, r) => a + r.금액, 0);
     if (!(실수령 > 0)) { toast('실제 입금액을 적어 주세요.'); return; }
+    // 입금액과 내역 합계가 다르면 내역 칸을 펼쳐 차이를 보여 주고 한 번 묻는다 (버그 4)
+    const 내역합 = 내역.reduce((a, r) => a + r.금액, 0);
+    if (내역합 > 0 && 내역합 !== 실수령) {
+      f.querySelector('details').open = true;
+      sumHint();
+      if (!confirm(`입금액 ${won(실수령)}과 내역 합계 ${won(내역합)}이 ${won(Math.abs(실수령 - 내역합))} 차이 나요.
+이대로 저장할까요? (계산에는 입금액만 써요)
+
+취소를 누르면 내역을 고칠 수 있어요.`)) return;
+    }
     const entry = { 월: m, 실수령, 내역, 메모: f.메모.value.trim() };
     state.월급기록 = [...state.월급기록.filter(r => r.월 !== m), entry].sort((a, b) => a.월.localeCompare(b.월));
     payMonth = m;
@@ -736,6 +750,13 @@ function settings(root, ctx) {
         <label class="btn">백업 가져오기<input type="file" accept="application/json,.json" data-import hidden></label>
       </div>
     </section>
+    <section class="card"><h2>QR로 기기 간 옮기기</h2>
+      <p class="hint">파일 없이 옮겨요. 보내는 기기 화면의 QR을 받는 기기 카메라로 찍으면 전체 데이터가 옮겨져요. 인터넷·서버를 거치지 않아요.</p>
+      <div class="actions">
+        <button class="btn" data-qr="send">QR로 보내기</button>
+        <button class="btn" data-qr="receive">QR로 받기</button>
+      </div>
+    </section>
     <section class="card"><h2>예시 데이터</h2>
       <p class="hint">가상의 예시 사용자 정보(연봉 3,600만원 등)로 바꿔 둘러볼 수 있어요. 지금 데이터는 지워지니 먼저 백업하세요.</p>
       <button class="btn" data-sample>예시 데이터 불러오기</button>
@@ -767,6 +788,7 @@ function settings(root, ctx) {
       modal('가져오기 실패', `<p>${esc(err.message || '파일을 읽지 못했어요.')}</p>`);
     } finally { e.target.value = ''; }
   };
+  root.querySelectorAll('[data-qr]').forEach(b => { b.onclick = () => { openTransfer(b.dataset.qr); ctx.go('#/옮기기'); }; });
   root.querySelector('[data-sample]').onclick = () => { if (confirm('지금 데이터를 예시 데이터로 바꿀까요?')) ctx.loadSample(); };
   root.querySelector('[data-reset]').onclick = async () => {
     if (!confirm('모든 데이터를 지울까요? 되돌릴 수 없어요.')) return;
@@ -795,11 +817,19 @@ export const PAGES = {
   내정보: { title: '내 정보', icon: '👤', render: profile },
   설정: { title: '설정·백업', icon: '⚙️', render: settings },
   온보딩: { title: '처음 시작 질문', icon: '', render: onboarding, hidden: true },
+  옮기기: { title: 'QR로 옮기기', icon: '', render: renderTransfer, hidden: true },
 };
 
+let lastPage = null;
 export function renderPage(name, root, ctx) {
   destroyCharts();
-  const page = PAGES[name] || PAGES.대시보드;
+  leaveTransfer(); // QR 화면을 떠나면 QR을 지우고 카메라를 끈다
+  if (!PAGES[name]) name = '대시보드';
+  // 다른 화면에서 월급 기록으로 들어오면 이번 달(또는 openPayMonth로 고른 달)부터 연다
+  if (name === '월급' && lastPage !== '월급') payMonth = payMonthNext;
+  payMonthNext = null;
+  lastPage = name;
+  const page = PAGES[name];
   page.render(root, ctx);
 }
 

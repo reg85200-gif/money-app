@@ -36,6 +36,8 @@
 }
 
 * { box-sizing: border-box; }
+/* hidden 속성은 항상 숨김 (.btn 같은 display 지정보다 우선) */
+[hidden] { display: none !important; }
 html, body { margin: 0; }
 body {
   background: var(--bg); color: var(--text);
@@ -236,3 +238,16 @@ dialog.modal::backdrop { background: rgba(0, 0, 0, .45); }
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 @media (prefers-reduced-motion: reduce) { #toast { transition: none; } }
+
+/* F17 QR로 옮기기 */
+.seg { display: flex; gap: 0; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg button { flex: 1; min-height: 44px; border: 0; background: var(--card); color: var(--text); font: inherit; cursor: pointer; }
+.seg button.active { background: var(--primary); color: var(--primary-text); font-weight: 700; }
+.qr-card { text-align: center; }
+.qr-meta { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.qr-img { width: min(100%, 420px); height: auto; aspect-ratio: 1; image-rendering: pixelated; background: #fff; border-radius: 8px; }
+.qr-ctrl { justify-content: center; margin-top: 10px; }
+.inline-select { flex-direction: row; align-items: center; gap: 6px; margin: 0; }
+.inline-select select { width: auto; }
+.cam-box { margin: 12px 0; }
+.cam-box video { width: 100%; max-width: 480px; aspect-ratio: 4 / 3; object-fit: cover; background: #000; border-radius: 10px; display: block; }
