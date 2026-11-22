@@ -21,6 +21,10 @@ export function emptyState() {
     생활비: { 월예산: 0, 지출: [] },
     상여배분: null,
     기록: [],
+    // F16 월별 실제 입금액: [{ 월: 'YYYY-MM', 실수령, 내역: [{ 항목, 금액 }], 메모 }]
+    월급기록: [],
+    // F16 덜 들어온 달에 줄일 항목 선택: { 'YYYY-MM': ['투자', '저축'] }
+    월급조정: {},
     설정: { 테마: '자동' },
   };
 }
@@ -67,6 +71,9 @@ export function normalize(state) {
   out.계좌 = Array.isArray(state.계좌) ? state.계좌 : [];
   out.기록 = Array.isArray(state.기록) ? state.기록 : [];
   out.이체체크 = state.이체체크 || {};
+  // 예전 백업(월급기록 없음)도 읽히도록 빈 값으로 채운다
+  out.월급기록 = Array.isArray(state.월급기록) ? state.월급기록.filter(r => r && /^\d{4}-\d{2}$/.test(r.월)) : [];
+  out.월급조정 = state.월급조정 && typeof state.월급조정 === 'object' ? state.월급조정 : {};
   return out;
 }
 

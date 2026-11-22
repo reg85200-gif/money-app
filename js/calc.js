@@ -96,8 +96,9 @@ export function mainLeftover(state, R) {
 }
 
 // 이번 달 저축률: 저축성 계좌의 월 납입액 합 ÷ 월 실수령액
+// 저축률은 이번 달 실제 입금액 기준 (F16: 기록이 없으면 기준 월급)
 export function savingRate(state, R) {
-  const net = monthlyNet(state, R);
+  const net = netFor(state, R);
   const saving = sum((state.계좌 || []).filter(a => SAVING_TYPES.includes(a.종류)), a => a.월납입);
   return { 저축액: saving, 비율: net > 0 ? saving / net : 0 };
 }
@@ -267,4 +268,87 @@ export function highRateLine(R) {
   const rates = (R.상품예시 || []).map(x => x.금리).filter(v => typeof v === 'number' && Number.isFinite(v));
   if (!rates.length) return null;
   return { 기준: Math.max(...rates), 근거: '원금이 보장되는 상품예시 중 가장 높은 금리' };
+}
+
+// ───── F16 이번 달 월급 기록 ─────
+// 기준 월급 = 연봉으로 계산한 월 실수령액 또는 직접 입력값 (monthlyNet)
+// 그 달 기록이 있으면 실제 입금액, 없으면 기준 월급을 쓴다
+
+export function payRecord(state, month = monthKey()) {
+  return (state.월급기록 || []).find(r => r.월 === month) || null;
+}
+
+// 그 달에 쓸 월급 (실제 입금액, 없으면 기준 월급)
+export function netFor(state, R, month = monthKey()) {
+  const rec = payRecord(state, month);
+  return rec && n(rec.실수령) > 0 ? n(rec.실수령) : monthlyNet(state, R);
+}
+
+export function payDiff(state, R, month = monthKey()) {
+  const 기준 = monthlyNet(state, R);
+  const rec = payRecord(state, month);
+  const 기록있음 = !!(rec && n(rec.실수령) > 0);
+  const 실제 = 기록있음 ? n(rec.실수령) : 기준;
+  return { 월: month, 기준, 실제, 기록있음, 차이: 실제 - 기준 };
+}
+
+// 최근 12개월(이번 달 포함) 월급 추이와 평균 (기록이 있는 달만 평균)
+export function payTrend(state, R, months = MONTHS_PER_YEAR, end = new Date()) {
+  const list = [];
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(end.getFullYear(), end.getMonth() - i, 1);
+    const m = monthKey(d);
+    const rec = payRecord(state, m);
+    list.push({ 월: m, 실수령: rec && n(rec.실수령) > 0 ? n(rec.실수령) : null });
+  }
+  const got = list.filter(x => x.실수령 !== null);
+  return { 목록: list, 기준: monthlyNet(state, R), 평균: got.length ? Math.round(got.reduce((a, x) => a + x.실수령, 0) / got.length) : null, 기록개월: got.length };
+}
+
+// 덜 들어온 달에 줄이는 순서: 저축·투자부터, 비상금·고정비는 마지막
+export const SHORTFALL_ORDER = ['투자', '저축', '예비비', '생활비', '비상금', '고정비'];
+export const SHORTFALL_DEFAULT = ['투자', '저축'];
+export const SHORTFALL_LAST = ['비상금', '고정비'];
+
+// 금액을 비율로 나누고, 반올림으로 생긴 몇 원 차이는 sink 항목(비율이 0이면 가장 큰 항목)에 더해 합계를 맞춘다
+function splitExact(total, ratio, keys, sink) {
+  const out = Object.fromEntries(keys.map(k => [k, Math.round(total * n((ratio || {})[k]))]));
+  const sumR = keys.reduce((a, k) => a + n((ratio || {})[k]), 0);
+  if (Math.abs(sumR - 1) > 1e-6) return out; // 비율 합이 100%가 아니면 맞추지 않음
+  const rest = Math.round(total) - keys.reduce((a, k) => a + out[k], 0);
+  const target = out[sink] > 0 ? sink : keys.reduce((m, k) => (out[k] > out[m] ? k : m), keys[0]);
+  out[target] += rest;
+  return out;
+}
+
+// 그 달 월급 배분
+// - 기본 금액은 기준 월급 × 배분 비율
+// - 더 들어온 달: 기본 금액은 그대로, 추가 수입(실제 − 기준)만 상여 배분 비율로 따로 나눈다
+// - 덜 들어온 달: 고른 항목을 SHORTFALL_ORDER 순서로 줄여 부족분을 메운다
+export function monthAllocation(state, R, ratio, month = monthKey()) {
+  const keys = ['고정비', '생활비', '저축', '비상금', '예비비', '투자'];
+  const d = payDiff(state, R, month);
+  const 기본 = splitExact(d.기준, ratio, keys, '생활비');
+  const out = { ...d, 기본, 최종: { ...기본 }, 추가: null, 부족: null };
+  if (!d.기록있음 || d.차이 === 0) return out;
+  if (d.차이 > 0) {
+    // 사용자가 정한 명절 상여 규칙이 있으면 그것, 없으면 상여배분예시(적용조건 선택)
+    const own = state.상여배분;
+    const sug = own ? null : bonusSuggestion(state, R);
+    const 비율 = own || (sug && sug.예시) || null;
+    const 분배 = 비율 ? splitExact(d.차이, 비율, ['비상금', '예비비', '저축', '투자', '즐거움'], '즐거움') : null;
+    out.추가 = { 금액: d.차이, 비율, 분배, 내규칙: !!own, 예시: sug };
+    return out;
+  }
+  const short = -d.차이;
+  const chosen = (state.월급조정 || {})[month] || SHORTFALL_DEFAULT;
+  let left = short;
+  const 줄임 = {};
+  for (const k of SHORTFALL_ORDER) {
+    if (!chosen.includes(k) || left <= 0) continue;
+    const cut = Math.min(out.최종[k], left);
+    if (cut > 0) { 줄임[k] = cut; out.최종[k] -= cut; left -= cut; }
+  }
+  out.부족 = { 금액: short, 고른항목: chosen, 줄임, 남은부족: left };
+  return out;
 }

@@ -1,5 +1,5 @@
 // 서비스 워커: 오프라인에서도 열리도록 앱 파일을 기기에 보관한다
-const CACHE = '내돈관리-v5';
+const CACHE = '내돈관리-v6';
 const SHELL = [
   './', './index.html', './manifest.json', './css/style.css',
   './js/app.js', './js/store.js', './js/rules.js', './js/calc.js', './js/recommend.js', './js/ui.js', './js/pages.js', './js/onboarding.js',

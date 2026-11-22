@@ -1,4 +1,4 @@
-// 각 화면 (F1~F11)
+// 각 화면 (F1~F11, F16)
 import * as C from './calc.js';
 import { recommendations } from './recommend.js';
 import { won, pct, esc, term, moneyInput, bindMoneyInputs, parseMoney, parsePercent, percentInput, modal, toast, bar, manwon } from './ui.js';
@@ -34,12 +34,16 @@ function dashboard(root, ctx) {
   const sr = C.savingRate(state, R);
   const recs = recommendations(state, R);
   const accs = state.계좌.filter(a => C.n(a.잔액) > 0);
+  const pd = C.payDiff(state, R);
+  const trend = C.payTrend(state, R);
   root.innerHTML = `
     <h1>대시보드</h1>
     <div class="stats">
       <div class="stat"><span>${term('순자산')}</span><strong>${won(C.netWorth(state))}</strong><small>총자산 ${won(C.totalAssets(state))} · 빚 ${won(C.totalDebt(state))}</small></div>
-      <div class="stat"><span>이번 달 ${term('저축률')}</span><strong>${pct(sr.비율)}</strong><small>월 ${won(sr.저축액)} 저축·투자</small></div>
-      <div class="stat"><span>${term('월 실수령액')}</span><strong>${won(net)}</strong><small>${C.n(state.프로필.월실수령직접) > 0 ? '직접 입력값' : '자동 계산(근사)'}</small></div>
+      <div class="stat"><span>이번 달 ${term('저축률')}</span><strong>${pct(sr.비율)}</strong><small>월 ${won(sr.저축액)} 저축·투자 ÷ ${pd.기록있음 ? '실제 입금액' : '기준 월급'}</small></div>
+      <div class="stat"><span>이번 달 입금액</span><strong>${won(pd.실제)}</strong>
+        <small>${pd.기록있음 ? `기준 ${won(pd.기준)} 대비 <b class="${pd.차이 > 0 ? 'ok' : pd.차이 < 0 ? 'neg' : ''}">${signed(pd.차이)}</b>` : `기록 없음 · 기준 ${term('월 실수령액', '월급')}(${C.n(state.프로필.월실수령직접) > 0 ? '직접 입력값' : '자동 계산'}) 사용`}</small>
+        <a class="btn small primary pay-btn" href="#/월급" data-pay-now>이번 달 월급 입력/수정</a></div>
     </div>
     <section class="card">
       <div class="card-head"><h2>지금 할 일</h2><a href="#/추천">전체 보기 (${recs.length})</a></div>
@@ -48,7 +52,13 @@ function dashboard(root, ctx) {
     <div class="two">
       <section class="card"><h2>계좌별 비중</h2>${accs.length ? '<div class="chart-box"><canvas id="pie" aria-label="계좌별 비중 원형 차트"></canvas></div>' : empty('잔액이 있는 계좌가 없어요.', '#/계좌', '계좌 추가')}</section>
       <section class="card"><h2>월별 순자산 추이</h2>${state.기록.length ? '<div class="chart-box"><canvas id="line" aria-label="월별 순자산 추이 선 차트"></canvas></div>' : empty('아직 기록이 없어요. 계좌 잔액을 고치면 그 달 순자산이 기록돼요.')}</section>
-    </div>`;
+    </div>
+    <section class="card">
+      <div class="card-head"><h2>최근 12개월 월급</h2><a href="#/월급">기록 보기</a></div>
+      <p class="hint">평균 ${trend.평균 === null ? '— (기록 없음)' : `<strong>${won(trend.평균)}</strong> (기록한 ${trend.기록개월}개월)`} · 기준 월급 ${won(trend.기준)}</p>
+      ${trend.기록개월 ? '<div class="chart-box"><canvas id="pay" aria-label="최근 12개월 월급 막대 차트"></canvas></div>' : empty('아직 월급 기록이 없어요.', '#/월급', '이번 달 월급 입력')}
+    </section>`;
+  root.querySelectorAll('[data-pay-now]').forEach(a => { a.onclick = () => { payMonth = C.monthKey(); }; });
   if (!window.Chart) {
     root.querySelectorAll('.chart-box').forEach(b => { b.innerHTML = '<p class="hint">차트 도구를 불러오지 못했어요. 인터넷에 연결한 뒤 한 번 열면 다음부터는 오프라인에서도 보여요.</p>'; });
     return;
@@ -72,6 +82,26 @@ function dashboard(root, ctx) {
         maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => fmt(c.parsed.y) } } },
         scales: { x: { ticks: { color: text }, grid: { color: grid } }, y: { ticks: { color: text, callback: v => manwon(v) }, grid: { color: grid } } },
+      },
+    }));
+  }
+  if (trend.기록개월) {
+    // 기준보다 많은 달·적은 달을 색으로 구분, 기준 월급은 점선
+    const up = cssVar('--c2'); const down = cssVar('--c5'); const same = cssVar('--c1');
+    charts.push(new window.Chart(root.querySelector('#pay'), {
+      type: 'bar',
+      data: {
+        // 휴대폰 폭에서도 겹치지 않게 "7월"처럼 달만 표시 (연도는 툴팁 제목에)
+        labels: trend.목록.map(x => `${Number(x.월.slice(5))}월`),
+        datasets: [
+          { type: 'bar', label: '실제 입금액', data: trend.목록.map(x => x.실수령), backgroundColor: trend.목록.map(x => x.실수령 === null ? same : x.실수령 > trend.기준 ? up : x.실수령 < trend.기준 ? down : same), borderRadius: 4 },
+          { type: 'line', label: '기준 월급', data: trend.목록.map(() => trend.기준), borderColor: cssVar('--muted'), borderDash: [6, 4], pointRadius: 0, borderWidth: 1.5 },
+        ],
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: text } }, tooltip: { callbacks: { title: items => items.length ? monthLabel(trend.목록[items[0].dataIndex].월) : '', label: c => c.parsed.y === null ? '기록 없음' : `${c.dataset.label}: ${fmt(c.parsed.y)}${c.datasetIndex === 0 ? ` (${signed(c.parsed.y - trend.기준)})` : ''}` } } },
+        scales: { x: { ticks: { color: text, autoSkip: false, maxRotation: 0, font: { size: 10 } }, grid: { display: false } }, y: { ticks: { color: text, callback: v => manwon(v) }, grid: { color: grid } } },
       },
     }));
   }
@@ -155,15 +185,23 @@ function allocation(root, ctx) {
   const month = C.monthKey();
   const checks = state.이체체크[month] || {};
   const total = ALLOC_KEYS.reduce((s, k) => s + C.n(cur.비율[k]), 0);
-  const amounts = Object.fromEntries(ALLOC_KEYS.map(k => [k, Math.round(net * C.n(cur.비율[k]))]));
+  // F16: 이번 달 실제 입금액 기준 (더 들어온 달은 추가분을 따로, 덜 들어온 달은 고른 항목을 줄임)
+  const ma = C.monthAllocation(state, R, cur.비율, month);
+  const amounts = ma.최종;
+  const extraRows = ma.추가 && ma.추가.분배 ? BONUS_KEYS.filter(k => ma.추가.분배[k] > 0).map(k => ({ key: `추가:${k}`, label: `추가 수입 → ${k}`, amount: ma.추가.분배[k] })) : [];
   const fixed = C.monthlyFixed(state);
   const preset = presets.find(p => p.이름 === cur.프리셋);
   root.innerHTML = `
     <h1>${term('월급 배분')} <small class="sub">(통장 쪼개기)</small></h1>
     ${net ? '' : `<div class="notice">월 실수령액이 없어요. <a href="#/내정보">내 정보</a>에서 연봉을 입력하세요.</div>`}
     <section class="card">
+      <div class="card-head"><h2>이번 달 입금액</h2><a class="btn small" href="#/월급" data-pay-now>이번 달 월급 입력/수정</a></div>
+      <p>${ma.기록있음 ? `실제 입금액 <strong>${won(ma.실제)}</strong> <small class="sub">(기준 ${won(ma.기준)} 대비 ${signed(ma.차이)})</small>` : `기록이 없어 기준 월급 <strong>${won(ma.기준)}</strong>으로 계산해요.`}</p>
+      ${ma.기록있음 && ma.차이 !== 0 ? monthAdjustHtml(ctx, month) : ''}
+    </section>
+    <section class="card">
       <h2>비율 정하기</h2>
-      <p>월 실수령액 <strong>${won(net)}</strong>을 아래 비율로 나눠요.</p>
+      <p>기준 월급 <strong>${won(net)}</strong>을 아래 비율로 나눠요.${ma.기록있음 && ma.차이 !== 0 ? ' 이번 달 금액은 위 안내대로 조정돼요.' : ''}</p>
       <form id="alloc" class="grid-fields">
         <label class="wide"><span>예시 비율 고르기</span><select name="프리셋">
           ${presets.map(p => `<option ${cur.프리셋 === p.이름 ? 'selected' : ''}>${esc(p.이름)}</option>`).join('')}
@@ -179,10 +217,14 @@ function allocation(root, ctx) {
       <table class="tbl"><thead><tr><th>완료</th><th>항목</th><th class="num">금액</th><th>보낼 계좌</th></tr></thead><tbody>
       ${ALLOC_KEYS.map(k => `<tr>
         <td><input type="checkbox" data-check="${k}" ${checks[k] ? 'checked' : ''} aria-label="${k} 이체 완료"></td>
-        <td>${k}</td><td class="num">${won(amounts[k])}</td>
+        <td>${k}</td><td class="num">${won(amounts[k])}${ma.부족 && ma.부족.줄임[k] ? `<br><small class="neg">−${won(ma.부족.줄임[k])}</small>` : ''}</td>
         <td><select data-link="${k}"><option value="">선택</option>${state.계좌.map(a => `<option value="${a.id}" ${(cur.계좌연결 || {})[k] === a.id ? 'selected' : ''}>${esc(a.별명)}</option>`).join('')}</select></td>
       </tr>`).join('')}
+      ${extraRows.map(x => `<tr class="mine">
+        <td><input type="checkbox" data-check="${x.key}" ${checks[x.key] ? 'checked' : ''} aria-label="${esc(x.label)} 이체 완료"></td>
+        <td>${esc(x.label)}</td><td class="num">${won(x.amount)}</td><td><small class="sub">추가 수입</small></td></tr>`).join('')}
       </tbody></table>
+      <p class="hint">합계 ${won(ALLOC_KEYS.reduce((s, k) => s + amounts[k], 0) + extraRows.reduce((s, x) => s + x.amount, 0))} · 이번 달 ${ma.기록있음 ? '실제 입금액' : '기준 월급'} ${won(ma.실제)}</p>
       <p class="hint">완료 표시는 이 기기에만 저장되고, 매달 새로 시작해요.</p>
     </section>
     <section class="card">
@@ -195,6 +237,8 @@ function allocation(root, ctx) {
         <tr><td>자동이체 후 주계좌에 남는 돈</td><td class="num"><strong>${won(C.mainLeftover(state, R))}</strong></td><td></td></tr>
       </tbody></table>
     </section>`;
+  bindMonthAdjust(root, ctx);
+  root.querySelector('[data-pay-now]').onclick = () => { payMonth = C.monthKey(); };
   const f = root.querySelector('#alloc');
   f.프리셋.onchange = () => {
     const p = presets.find(x => x.이름 === f.프리셋.value);
@@ -225,6 +269,136 @@ function allocation(root, ctx) {
       await ctx.save();
     };
   });
+}
+
+// ───────── F16 이번 달 월급 기록 ─────────
+let payMonth = null; // 월급 기록 화면에서 고친 달 (없으면 이번 달)
+export function openPayMonth(m) { payMonth = m; }
+
+function monthLabel(m) { return m.replace('-', '년 ').replace(/^(\d+년 )0?/, '$1') + '월'; }
+function signed(v) { return (v > 0 ? '+' : v < 0 ? '−' : '') + won(Math.abs(v)); }
+
+// 기본 배분 비율 (저장한 비율, 없으면 첫 배분예시)
+function currentRatio(state, R) {
+  const presets = Array.isArray(R.배분예시) ? R.배분예시 : [];
+  return (state.배분 && state.배분.비율) || (presets[0] ? presets[0].비율 : {});
+}
+
+// 더 들어온 달·덜 들어온 달 안내 (월급 기록 화면과 월급 배분 화면에서 같이 씀)
+function monthAdjustHtml(ctx, month) {
+  const { state, R } = ctx;
+  const a = C.monthAllocation(state, R, currentRatio(state, R), month);
+  if (!a.기록있음) return `<p class="hint">${monthLabel(month)} 입금액 기록이 없어 기준 월급 ${won(a.기준)}으로 계산해요.</p>`;
+  if (a.추가) {
+    const t = a.추가;
+    const head = `<p>${monthLabel(month)}에는 기준보다 <strong class="ok">${won(t.금액)}</strong> 더 들어왔어요. 기본 배분은 기준 월급(${won(a.기준)})대로 두고, <strong>추가 수입만 따로</strong> 나누세요. 생활비를 늘리지 않는 게 목적이에요.</p>`;
+    if (!t.분배) return head + `<p class="warn">${t.예시 && t.예시.비상금먼저 ? '비상금이 아직 부족하니 추가 수입 중 비상금 몫을 먼저 정하세요.' : '추가 수입을 어디로 보낼지 비율을 정하세요.'} <a href="#/비정기">상여 배분 규칙 정하기</a></p>`;
+    const why = t.내규칙 ? '내가 정한 명절 상여 배분 규칙을 그대로 써요.' : `"${esc(t.예시.이름)}" 예시 비율이에요. ${esc(C.bonusReason(t.예시))}.`;
+    return head + `<div class="scroll-auto"><table class="tbl"><thead><tr>${BONUS_KEYS.map(k => `<th class="num">${k}</th>`).join('')}</tr></thead><tbody><tr>${BONUS_KEYS.map(k => `<td class="num">${won(t.분배[k])}</td>`).join('')}</tr></tbody></table></div>
+      <p class="hint">${why} ${!t.내규칙 && t.예시.개인출처 ? refBadge(PERSONAL_LABEL) : ''} <a href="#/비정기">비율 바꾸기</a></p>`;
+  }
+  const s = a.부족;
+  const opt = k => `<label><input type="checkbox" data-cut="${k}" ${s.고른항목.includes(k) ? 'checked' : ''}> ${k}${s.줄임[k] ? ` <small class="sub">−${won(s.줄임[k])}</small>` : ''}</label>`;
+  return `<p>${monthLabel(month)}에는 기준보다 <strong class="neg">${won(s.금액)}</strong> 덜 들어왔어요. 이번 달에 줄일 곳을 고르세요. 위에서부터 차례로 줄여요.</p>
+    <div class="checks" data-month="${month}">${C.SHORTFALL_ORDER.filter(k => !C.SHORTFALL_LAST.includes(k)).map(opt).join('')}</div>
+    <p class="hint">비상금·고정비는 마지막에 줄이세요. 고정비(보험료 등)는 줄이기 어렵고, 비상금은 이런 달을 위한 돈이에요.</p>
+    <div class="checks" data-month="${month}">${C.SHORTFALL_LAST.map(opt).join('')}</div>
+    ${s.남은부족 > 0 ? `<p class="warn">고른 항목만으로는 ${won(s.남은부족)}이 모자라요. 줄일 항목을 더 고르세요.</p>` : '<p class="ok">부족분을 모두 메웠어요 ✓</p>'}`;
+}
+function bindMonthAdjust(root, ctx) {
+  root.querySelectorAll('[data-cut]').forEach(c => {
+    c.onchange = async () => {
+      const month = c.closest('[data-month]').dataset.month;
+      const chosen = [...root.querySelectorAll(`[data-month="${month}"] [data-cut]:checked`)].map(x => x.dataset.cut);
+      ctx.state.월급조정 = { ...(ctx.state.월급조정 || {}), [month]: chosen };
+      await ctx.save();
+      ctx.rerender();
+    };
+  });
+}
+
+function payRows(rows) {
+  const list = rows && rows.length ? rows : [{}];
+  return list.map((r, i) => `<div class="grid-fields pay-row" data-i="${i}">
+    <label><span>항목</span><input name="내역항목__${i}" value="${esc(r.항목 || '')}" placeholder="${i === 0 ? '예: 기본급' : '예: 연장근무수당'}" list="pay-items"></label>
+    <label><span>금액</span>${moneyInput('내역금액__' + i, r.금액)}</label>
+  </div>`).join('');
+}
+
+function payPage(root, ctx) {
+  const { state, R } = ctx;
+  const month = payMonth || C.monthKey();
+  const rec = C.payRecord(state, month);
+  const base = C.monthlyNet(state, R);
+  const trend = C.payTrend(state, R);
+  const list = state.월급기록.slice().sort((a, b) => b.월.localeCompare(a.월));
+  root.innerHTML = `
+    <h1>이번 달 월급 기록</h1>
+    <p class="hint">연장근무 등으로 달마다 실제 입금액이 다르면 여기에 적으세요. 그 달 월급 배분·이체 체크리스트·저축률이 이 금액으로 계산돼요. 기록이 없는 달은 기준 월급 <strong>${won(base)}</strong>을 써요.</p>
+    <section class="card">
+      <form id="pay" class="grid-fields" autocomplete="off">
+        <label><span>달</span><input type="month" name="월" value="${month}" required></label>
+        <label><span>실제 입금액 (통장에 들어온 금액)</span>${moneyInput('실수령', rec ? rec.실수령 : '', 'placeholder="예: 2,700,000"')}</label>
+        <details class="wide" ${rec && rec.내역 && rec.내역.length ? 'open' : ''}><summary>내역 적기 (선택: 기본급·연장근무수당 등)</summary>
+          <div id="pay-rows">${payRows(rec && rec.내역)}</div>
+          <button type="button" class="btn small" data-add-row>+ 항목 추가</button>
+          <p class="hint" id="pay-sum"></p>
+        </details>
+        <datalist id="pay-items">${['기본급', '연장근무수당', '야간근무수당', '휴일근무수당', '식대', '교통비', '기타 수당', '공제 조정'].map(x => `<option value="${x}">`).join('')}</datalist>
+        <label class="wide"><span>메모 (선택)</span><input name="메모" value="${esc(rec ? rec.메모 || '' : '')}" placeholder="예: 연장근무 많았던 달"></label>
+        <div class="actions wide"><button class="btn primary" type="submit">${rec ? '수정 저장' : '저장'}</button>${rec ? '<button class="btn ghost danger" type="button" data-del-rec>이 달 기록 지우기</button>' : ''}</div>
+      </form>
+    </section>
+    <section class="card"><h2>${monthLabel(month)} 배분 안내</h2>${monthAdjustHtml(ctx, month)}<p><a href="#/배분">월급 배분 화면에서 이체 체크하기 →</a></p></section>
+    <section class="card"><h2>기록한 달</h2>
+      <p class="hint">최근 12개월 평균 ${trend.평균 === null ? '— (기록 없음)' : `<strong>${won(trend.평균)}</strong> (${trend.기록개월}개월)`} · 기준 월급 ${won(base)}</p>
+      ${list.length ? `<ul class="acc-list">${list.map(r => `<li><div><strong>${monthLabel(r.월)}</strong><small>${r.메모 ? esc(r.메모) + ' · ' : ''}기준 대비 ${signed(C.n(r.실수령) - base)}</small></div>
+        <div class="right"><strong>${won(r.실수령)}</strong><button class="btn small ghost" data-edit-month="${r.월}">수정</button></div></li>`).join('')}</ul>` : '<p class="hint">아직 기록이 없어요.</p>'}
+    </section>`;
+  const f = root.querySelector('#pay');
+  bindMoneyInputs(f);
+  bindMonthAdjust(root, ctx);
+  const readRows = () => [...f.querySelectorAll('.pay-row')].map(r => ({
+    항목: r.querySelector('[name^="내역항목"]').value.trim(), 금액: parseMoney(r.querySelector('[name^="내역금액"]').value),
+  }));
+  const sumHint = () => {
+    const rows = readRows().filter(r => r.금액);
+    const s = rows.reduce((a, r) => a + r.금액, 0);
+    const total = parseMoney(f.실수령.value);
+    f.querySelector('#pay-sum').textContent = rows.length ? `내역 합계 ${won(s)}${total && total !== s ? ` · 입금액과 ${won(Math.abs(total - s))} 차이 (입금액을 비워 두면 내역 합계로 저장해요)` : ''}` : '';
+  };
+  f.addEventListener('input', sumHint);
+  sumHint();
+  f.querySelector('[data-add-row]').onclick = () => {
+    const rows = [...readRows(), {}];
+    f.querySelector('#pay-rows').innerHTML = payRows(rows);
+    bindMoneyInputs(f);
+  };
+  // 다른 달을 고르면 그 달 기록을 불러온다
+  f.월.onchange = () => { if (f.월.value) { payMonth = f.월.value; ctx.rerender(); } };
+  f.onsubmit = async e => {
+    e.preventDefault();
+    const m = f.월.value;
+    if (!/^\d{4}-\d{2}$/.test(m)) { toast('달을 골라 주세요.'); return; }
+    const 내역 = readRows().filter(r => r.항목 || r.금액);
+    let 실수령 = parseMoney(f.실수령.value);
+    if (!실수령 && 내역.length) 실수령 = 내역.reduce((a, r) => a + r.금액, 0);
+    if (!(실수령 > 0)) { toast('실제 입금액을 적어 주세요.'); return; }
+    const entry = { 월: m, 실수령, 내역, 메모: f.메모.value.trim() };
+    state.월급기록 = [...state.월급기록.filter(r => r.월 !== m), entry].sort((a, b) => a.월.localeCompare(b.월));
+    payMonth = m;
+    await ctx.save();
+    toast(`${monthLabel(m)} 월급을 저장했어요.`);
+    ctx.rerender();
+  };
+  const del = root.querySelector('[data-del-rec]');
+  if (del) del.onclick = async () => {
+    if (!confirm(`${monthLabel(month)} 월급 기록을 지울까요? 기준 월급으로 계산돼요.`)) return;
+    state.월급기록 = state.월급기록.filter(r => r.월 !== month);
+    await ctx.save();
+    ctx.rerender();
+  };
+  root.querySelectorAll('[data-edit-month]').forEach(b => { b.onclick = () => { payMonth = b.dataset.editMonth; ctx.rerender(); }; });
 }
 
 // ───────── F4 생활비 관리 ─────────
@@ -610,6 +784,7 @@ export const PAGES = {
   대시보드: { title: '대시보드', icon: '🏠', render: dashboard },
   추천: { title: '지금 할 일', icon: '✅', render: recommendPage },
   배분: { title: '월급 배분', icon: '🔀', render: allocation },
+  월급: { title: '월급 기록', icon: '💵', render: payPage },
   생활비: { title: '생활비', icon: '🧾', render: living },
   계좌: { title: '계좌 관리', icon: '🏦', render: accounts },
   저축: { title: '저축 계산기', icon: '🧮', render: savings },
